@@ -189,13 +189,14 @@ tr:hover td{background:var(--surface2)}
       <button class="auth-tab" onclick="switchAuthTab('register')">Novo agente</button>
     </div>
     <div id="loginForm">
-      <div class="field"><label>Usuário</label><input id="loginUser" type="text" placeholder="ex: joao.silva"/><div style="font-size:11px;color:var(--text3);margin-top:4px">Só o nome de usuário, sem @email</div></div>
+      <div class="field"><label>E-mail</label><input id="loginUser" type="email" placeholder="ex: joao@empresa.com"/><div style="font-size:11px;color:var(--text3);margin-top:4px">Use seu e-mail de cadastro</div></div>
       <div class="field"><label>Senha</label><input id="loginPass" type="password" placeholder="••••••"/></div>
       <button class="btn-primary" id="btnLogin" onclick="doLogin()">Entrar</button>
       <div class="auth-err" id="loginErr"></div>
     </div>
     <div id="registerForm" style="display:none">
       <div class="field"><label>Nome completo</label><input id="regName" type="text" placeholder="João Silva"/></div>
+      <div class="field"><label>E-mail</label><input id="regEmail" type="email" placeholder="joao@empresa.com"/></div>
       <div class="field"><label>Usuário</label><input id="regUser" type="text" placeholder="joao.silva"/><div style="font-size:11px;color:var(--text3);margin-top:4px">Sem espaços ou caracteres especiais</div></div>
       <div class="field"><label>Senha</label><input id="regPass" type="password" placeholder="mínimo 6 caracteres"/></div>
       <button class="btn-primary" id="btnRegister" onclick="doRegister()">Criar conta</button>
@@ -455,17 +456,20 @@ function switchAuthTab(t) {
   document.getElementById('registerErr').textContent = '';
 }
 
+// Fallback: converte username legado para o formato de e-mail interno usado antes da migração
 const toEmail = u => u.toLowerCase().replace(/[^a-z0-9._-]/g,'') + '@dialpro.interno';
 
 async function doLogin() {
-  const username = document.getElementById('loginUser').value.trim().toLowerCase();
+  const input = document.getElementById('loginUser').value.trim();
   const pass = document.getElementById('loginPass').value;
   const btn = document.getElementById('btnLogin');
-  if (!username || !pass) { document.getElementById('loginErr').textContent = 'Preencha usuário e senha'; return; }
+  if (!input || !pass) { document.getElementById('loginErr').textContent = 'Preencha e-mail e senha'; return; }
   btn.disabled = true; btn.textContent = 'Entrando...';
-  const { data, error } = await sb.auth.signInWithPassword({ email: toEmail(username), password: pass });
+  // Tenta login com o valor digitado como e-mail real; se não contiver @, assume username legado
+  const email = input.includes('@') ? input.toLowerCase() : toEmail(input);
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
   btn.disabled = false; btn.textContent = 'Entrar';
-  if (error) { document.getElementById('loginErr').textContent = 'Usuário ou senha incorretos'; return; }
+  if (error) { document.getElementById('loginErr').textContent = 'E-mail ou senha incorretos'; return; }
   document.getElementById('authScreen').style.display = 'none';
   document.getElementById('loader').style.display = 'flex';
   await loadUserAndStart(data.user);
@@ -473,23 +477,25 @@ async function doLogin() {
 
 async function doRegister() {
   const name = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value.trim().toLowerCase();
   const username = document.getElementById('regUser').value.trim().toLowerCase().replace(/[^a-z0-9._-]/g,'');
   const pass = document.getElementById('regPass').value;
   const btn = document.getElementById('btnRegister');
-  if (!name || !username || pass.length < 6) { document.getElementById('registerErr').textContent = 'Preencha todos os campos (senha mín. 6 caracteres)'; return; }
+  if (!name || !email || !username || pass.length < 6) { document.getElementById('registerErr').textContent = 'Preencha todos os campos (senha mín. 6 caracteres)'; return; }
+  if (!email.includes('@')) { document.getElementById('registerErr').textContent = 'Informe um e-mail válido'; return; }
   if (username.length < 3) { document.getElementById('registerErr').textContent = 'Usuário muito curto (mín. 3 caracteres)'; return; }
   const { data: existing } = await sb.from('profiles').select('id').eq('username', username).maybeSingle();
   if (existing) { document.getElementById('registerErr').textContent = 'Este usuário já está em uso'; return; }
   btn.disabled = true; btn.textContent = 'Criando conta...';
-  const { data, error } = await sb.auth.signUp({ email: toEmail(username), password: pass });
+  const { data, error } = await sb.auth.signUp({ email, password: pass });
   if (error) { document.getElementById('registerErr').textContent = 'Erro: ' + error.message; btn.disabled = false; btn.textContent = 'Criar conta'; return; }
   if (data.user) {
-    await sb.from('profiles').upsert({ id: data.user.id, name, username, empresa: 'DialPro', role: 'agent' });
+    await sb.from('profiles').upsert({ id: data.user.id, name, username, email, empresa: 'DialPro', role: 'agent' });
   }
   btn.disabled = false; btn.textContent = 'Criar conta';
   toast('Conta criada! Faça login.');
   switchAuthTab('login');
-  document.getElementById('loginUser').value = username;
+  document.getElementById('loginUser').value = email;
 }
 
 async function doLogout() {
